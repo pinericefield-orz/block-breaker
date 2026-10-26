@@ -12,7 +12,7 @@
 </head>
 <body>
   <h1>YUYA BLOCK BREAKER</h1>
-  <canvas id="myCanvas" width="600" height="450"></canvas>
+  <canvas id="myCanvas" width="800" height="500"></canvas>
   <p>左右キー（← →）でパドルを操作</p>
 
   <script>
@@ -21,52 +21,44 @@
 
     // ボールとパドルの設定
     let x = canvas.width / 2;
-    let y = canvas.height - 40;
+    let y = canvas.height - 50;
     let dx = 3;
     let dy = -3;
-    const ballRadius = 7;
+    const ballRadius = 8;
 
     const paddleHeight = 12;
-    const paddleWidth = 85;
+    const paddleWidth = 100;
     let paddleX = (canvas.width - paddleWidth) / 2;
 
     let rightPressed = false;
     let leftPressed = false;
 
-    // ブロックの設定（数を増やす：10列 × 8行）
-    const brickRowCount = 8;
-    const brickColumnCount = 10;
-    const brickWidth = 48;
-    const brickHeight = 16;
-    const brickPadding = 6;
-    const brickOffsetTop = 60; // 上部の空間を広げました
-    const brickOffsetLeft = 32;
+    // ブロックの設定（横17列 × 縦7行）
+    const brickRowCount = 7;
+    const brickColumnCount = 17;
+    const brickWidth = 38;
+    const brickHeight = 18;
+    const brickPadding = 5;
+    const brickOffsetTop = 60; // ブロックとパドルの間に十分な空間を確保
+    const brickOffsetLeft = 35;
 
-    // 「YUYA」のブロック配置マップ (0: なし, 1: 文字ブロック, 2: 背景ブロック)
-    // 10x8 ドットで表現
-    const yuyaPattern = [
-      [1,0,1, 0,1,0,1, 0,1,0,1, 0,1,1,1], // 1行目
-      [1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1], // ※自動補正用マップデータ
-    ];
-
-    // 「YUYA」をきれいに見せるための色と位置の配列定義（10x8のグリッド）
-    // 1 = YUYA文字（明るいシアン色）, 2 = 周囲の背景ブロック（薄いグレー）
+    // 「Y U Y A」を描く17×7のドットマップ
+    // 1: YUYAの文字ブロック（ネオンブルー）, 2: 下部の飾りブロック（グレー）
     const letterLayout = [
-      [1,0,1, 0,1,0,1, 0,1,0,1, 0,0,1,0], // Y U Y A
-      [1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1],
-      [0,1,0, 0,1,0,1, 0,0,1,0, 0,1,1,1],
-      [0,1,0, 0,1,0,1, 0,0,1,0, 0,1,0,1],
-      [0,1,0, 0,1,1,1, 0,0,1,0, 0,1,0,1],
-      [2,2,2, 2,2,2,2, 2,2,2,2, 2,2,2,2], // 文字の下の飾りブロック
-      [2,2,2, 2,2,2,2, 2,2,2,2, 2,2,2,2]
+      [1,0,1, 0, 1,0,1, 0, 1,0,1, 0, 0,1,1,0, 0], // 行1: Y U Y A
+      [1,0,1, 0, 1,0,1, 0, 1,0,1, 0, 1,0,0,1, 0], // 行2
+      [0,1,0, 0, 1,0,1, 0, 0,1,0, 0, 1,1,1,1, 0], // 行3
+      [0,1,0, 0, 1,0,1, 0, 0,1,0, 0, 1,0,0,1, 0], // 行4
+      [0,1,0, 0, 0,1,1, 0, 0,1,0, 0, 1,0,0,1, 0], // 行5
+      [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],         // 行6: 飾りブロック
+      [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]          // 行7: 飾りブロック
     ];
 
     const bricks = [];
     for (let c = 0; c < brickColumnCount; c++) {
       bricks[c] = [];
       for (let r = 0; r < brickRowCount; r++) {
-        // letterLayoutに合わせたブロックのタイプを取得
-        let type = 2; 
+        let type = 0;
         if (r < letterLayout.length && c < letterLayout[r].length) {
           type = letterLayout[r][c];
         }
@@ -103,7 +95,7 @@
     function drawBall() {
       ctx.beginPath();
       ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
-      ctx.fillStyle = "#FFD700"; // ボールはゴールド色
+      ctx.fillStyle = "#FFD700"; // ゴールド色
       ctx.fill();
       ctx.closePath();
     }
@@ -128,11 +120,10 @@
             ctx.beginPath();
             ctx.rect(brickX, brickY, brickWidth, brickHeight);
             
-            // 「YUYA」の文字(type:1)と背景(type:2)で色を変える
             if (bricks[c][r].type === 1) {
-              ctx.fillStyle = "#00E5FF"; // YUYA文字：鮮やかなシアン
+              ctx.fillStyle = "#00E5FF"; // YUYA文字：ネオンブルー
             } else {
-              ctx.fillStyle = "#555555"; // 背景ブロック：シックなグレー
+              ctx.fillStyle = "#444444"; // 下部ブロック：ダークグレー
             }
             
             ctx.fill();
@@ -149,7 +140,7 @@
       drawPaddle();
       collisionDetection();
 
-      // 壁との衝突判定
+      // 壁との反射
       if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) dx = -dx;
       if (y + dy < ballRadius) dy = -dy;
       else if (y + dy > canvas.height - ballRadius - 10 - paddleHeight) {
@@ -162,8 +153,8 @@
         }
       }
 
-      if (rightPressed && paddleX < canvas.width - paddleWidth) paddleX += 6;
-      else if (leftPressed && paddleX > 0) paddleX -= 6;
+      if (rightPressed && paddleX < canvas.width - paddleWidth) paddleX += 7;
+      else if (leftPressed && paddleX > 0) paddleX -= 7;
 
       x += dx;
       y += dy;
