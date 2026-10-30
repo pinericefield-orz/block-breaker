@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>YUYA BLOCK BREAKER</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #10131c; color: white; font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 14px 10px 24px; }
+    h1 { margin: 10px 0 12px; font-size: clamp(20px, 5vw, 28px); letter-spacing: .10em; }
+    .game { width: min(100%, 800px); margin: auto; }
+    .hud { display: flex; justify-content: space-between; gap: 8px; padding: 0 5px 8px; font-size: clamp(13px, 3.5vw, 17px); font-weight: 700; }
+    .stage { position: relative; width: 100%; border: 2px solid #0095dd; border-radius: 8px; overflow: hidden; box-shadow: 0 0 20px rgba(0, 149, 221, .35); background: #050913; }
+    canvas { display: block; width: 100%; height: auto; touch-action: none; }
+    .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 14px; background: rgba(0, 5, 15, .88); }
+    .overlay.show { display: flex; }
+    .panel { max-width: 95%; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
+    .certificate { display: none; margin: 8px auto; max-width: 540px; }
+    .certificate.show { display: block; }
+    .rank { color: #ffdf76; font-weight: 800; font-size: clamp(18px, 4vw, 25px); }
+    .rank-table { margin: 10px auto; width: 100%; max-width: 430px; border-collapse: collapse; font-size: clamp(11px, 2.5vw, 14px); }
+    .rank-table td { padding: 4px 9px; border-bottom: 1px solid #33465c; }
+    .rank-table td:first-child { text-align: left; }
+    .rank-table td:last-child { text-align: right; }
+    .rank-table tr.selected { color: #ffdf76; font-weight: 800; background: #25334b; }
+    .cert-form { display: grid; gap: 9px; justify-items: center; margin: 10px 0 12px; }
+    .cert-form label { font-size: 14px; }
+    .cert-form input { width: min(100%, 290px); padding: 10px 12px; font-size: 16px; color: #fff; background: #16263b; border: 1px solid #6f89a5; border-radius: 8px; }
+    .cert-form button { background: #ffdc75; }
+    .rank-actions { display: grid; gap: 8px; justify-items: center; margin: 10px auto; }
+    .rank-actions label { font-size: 13px; color: #d4dfed; display: flex; align-items: center; gap: 6px; }
+    .rank-actions input { width: 18px; height: 18px; }
+    .rank-actions button { background: #a8e8ff; }
+    .leaderboard { margin: 18px auto; max-width: 800px; border: 1px solid #304358; border-radius: 12px; padding: 12px; background: #151e2c; }
+    .leaderboard h2 { font-size: 18px; margin: 0 0 8px; }
+    .leaderboard table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .leaderboard th, .leaderboard td { padding: 8px 5px; border-bottom: 1px solid #334053; }
+    .leaderboard .hint { font-size: 12px; color: #b3bfd0; line-height: 1.5; }
+    .ranking-status { font-size: 12px; color: #ffdc75; }
+    .cert-note { font-size: 12px !important; color: #b6c9d9 !important; }
+    .time-label { color: #c1d6e5; }
+    .panel h2 { font-size: clamp(23px, 5vw, 38px); line-height: 1.3; margin: 0 0 8px; color: #00e5ff; }
+    .panel p { font-size: clamp(15px, 3.5vw, 21px); line-height: 1.5; margin: 10px 0 16px; color: #fff; }
+    button { border: 0; color: #05121a; background: #00e5ff; font: inherit; font-weight: 800; padding: 12px 22px; border-radius: 999px; cursor: pointer; min-height: 44px; }
+    button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
+    .controls { margin-top: 12px; display: flex; justify-content: center; gap: 12px; align-items: center; }
+    #pauseButton { background: #34445b; color: #fff; }
+    @media (max-width: 480px) {
+      .overlay { padding: 6px; }
+      .panel h2 { font-size: 19px; margin-bottom: 2px; }
+      .panel p { font-size: 12px; line-height: 1.35; margin: 4px 0 8px; }
+      .panel button { padding: 9px 14px; min-height: 40px; font-size: 13px; }
+      .rank-table td { padding: 3px 7px; }
+      .certificate { margin: 4px auto; }
+      .cert-form { gap: 6px; }
+    }
+    .help { color: #b3bfd0; margin: 12px auto 0; font-size: 13px; line-height: 1.65; }
+  </style>
+</head>
+<body>
+  <h1>YUYA BLOCK BREAKER</h1>
+  <main class="game">
+    <div class="hud" aria-live="polite">
+      <span id="scoreLabel">SCORE: 0</span>
+      <span id="livesLabel">LIVES: ♥</span>
+      <span id="timeLabel">TIME: 0:00</span>
+    </div>
+    <div class="stage">
+      <canvas id="myCanvas" width="800" height="500" aria-label="ブロック崩しゲーム"></canvas>
+      <div id="overlay" class="overlay" role="status" aria-live="polite">
+        <div class="panel">
+          <h2 id="overlayTitle"></h2>
+          <p id="overlayText"></p>
+          <section id="certificate" class="certificate" aria-label="クリア認定証">
+            <div id="achievedRank" class="rank"></div>
+            <div class="time-label" id="clearTime"></div>
+            <table class="rank-table" aria-label="全称号の獲得条件"><tbody id="rankRows"></tbody></table>
+            <form id="certificateForm" class="cert-form">
+              <label for="playerName">賞状に載せるお名前（20文字以内）</label>
+              <input id="playerName" name="playerName" maxlength="20" required autocomplete="nickname" placeholder="例：松田 悠也">
+              <button type="submit">🏆 賞状PDFをダウンロード</button>
+            </form>
+            <div class="rank-actions">
+              <label><input id="rankingConsent" type="checkbox"> 自分の名前・記録をランキングに掲載する（任意）</label>
+              <button id="rankingSubmit" type="button">ランキングに登録</button>
+              <span id="rankingStatus" class="ranking-status" aria-live="polite"></span>
+            </div>
+            <p class="cert-note">賞状の発行とランキング登録は別々です。未チェックなら掲載されません。登録するとお名前・タイム・得点がインターネット上で公開されます。賞状用のお名前は登録しない限り送信されません。</p>
+          </section>
+          <button id="restartButton" type="button">もう一度遊ぶ</button>
+        </div>
+      </div>
+    </div>
+    <div class="controls"><button id="pauseButton" type="button">一時停止</button></div>
+    <section class="leaderboard" aria-label="ランキング">
+      <h2>🏅 全プレイヤー共通ランキング TOP 10</h2>
+      <table><thead><tr><th>順位</th><th>名前</th><th>称号</th><th>タイム</th><th>得点</th></tr></thead><tbody id="leaderboardRows"></tbody></table>
+      <p class="hint">掲載はクリア後に希望した方のみ。ランキング表示にはネット接続が必要です。</p>
+    </section>
+    <p class="help">PC：← → キー／マウス　｜　スマホ：ゲーム画面を指で左右になぞる<br>スペースキーで一時停止・再開</p>
+  </main>
+  <script>
+    'use strict';
+    const canvas = document.getElementById('myCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreLabel = document.getElementById('scoreLabel');
+    const livesLabel = document.getElementById('livesLabel');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlayText = document.getElementById('overlayText');
+    const restartButton = document.getElementById('restartButton');
+    const pauseButton = document.getElementById('pauseButton');
+    const timeLabel = document.getElementById('timeLabel');
+    const certificate = document.getElementById('certificate');
+    const certificateForm = document.getElementById('certificateForm');
+    const playerName = document.getElementById('playerName');
+    const achievedRank = document.getElementById('achievedRank');
+    const clearTime = document.getElementById('clearTime');
+    const rankRows = document.getElementById('rankRows');
+    const rankingConsent = document.getElementById('rankingConsent');
+    const rankingSubmit = document.getElementById('rankingSubmit');
+    const rankingStatus = document.getElementById('rankingStatus');
+    const leaderboardRows = document.getElementById('leaderboardRows');
+    // Supabase の Project URL と公開可能な anon/publishable key を入力してください。
+    // service_role / secret key は絶対にHTMLへ記載しないでください。
+    const SUPABASE_URL = 'https://xlhwuhfjevkpggiyuyne.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_wC9AlZfAVyPailht6pzKDg_WoQjY5jv';
+    const backendReady = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL)
+      && !SUPABASE_KEY.startsWith('YOUR_');
+    let runId = 0;
+    let savedRunId = null;
+    const leaderboardHint = document.querySelector('.leaderboard .hint');
+    if (!backendReady) {
+      leaderboardHint.textContent = 'オンラインランキングは準備中です。管理者がSupabaseの接続設定を完了すると公開されます。';
+      rankingSubmit.disabled = true;
+      rankingSubmit.textContent = 'ランキング準備中';
+    }
+    async function api(path, options = {}) {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        ...options,
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.status === 204 ? null : response.json();
+    }
+    async function renderBoard() {
+      leaderboardRows.replaceChildren();
+      const message = text => {
+        const tr = document.createElement('tr'), td = document.createElement('td');
+        td.colSpan = 5; td.textContent = text;
+        tr.append(td); leaderboardRows.append(tr);
+      };
+      if (!backendReady) { message('オンラインランキング準備中'); return; }
+      message('ランキングを読み込んでいます…');
+      try {
+        const board = await api('yuya_scores?select=name,seconds,score&order=seconds.asc,score.desc&limit=10');
+        leaderboardRows.replaceChildren();
+        if (!board.length) { message('まだ記録がありません。最初のランカーになりましょう！'); return; }
+        board.forEach((entry, i) => {
+          const tr = document.createElement('tr');
+          [i + 1, entry.name, currentRank(entry.seconds).title, formatTime(entry.seconds), entry.score].forEach(value => {
+            const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
+          });
+          leaderboardRows.append(tr);
+        });
+      } catch (error) { leaderboardRows.replaceChildren(); message('ランキングを取得できませんでした。通信状態をご確認ください。'); }
+    }
+    rankingSubmit.addEventListener('click', async () => {
+      if (state !== 'won' || !backendReady) return;
+      if (!rankingConsent.checked) { rankingStatus.textContent = '掲載する場合はチェックを入れてください。'; return; }
+      const name = playerName.value.trim().replace(/[\r\n\t]/g, ' ').slice(0, 20);
+      if (!name) { rankingStatus.textContent = 'お名前を入力してください。'; playerName.focus(); return; }
+      if (savedRunId === runId) { rankingStatus.textContent = 'このプレイは登録済みです。'; return; }
+      const pendingRun = runId;
+      rankingSubmit.disabled = true;
+      rankingStatus.textContent = '登録中…';
+      try {
+        await api('yuya_scores', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ name, seconds: finalSeconds, score })
+        });
+        savedRunId = pendingRun;
+        rankingStatus.textContent = '全プレイヤー共通ランキングに登録しました！';
+        await renderBoard();
+      } catch (error) {
+        rankingStatus.textContent = '登録できませんでした。通信や設定をご確認ください。';
+      } finally { rankingSubmit.disabled = false; }
+    });
+
+    // タイムは「プレイ中」のみ進む。一時停止や離席時間は加算しない。
+    const ranks = [
+      { limit: 90, title: '教授', criterion: '1分30秒未満', message: 'ブロック崩し界の重鎮です。' },
+      { limit: 150, title: '博士', criterion: '1分30秒〜2分29秒', message: '学位論文より先にブロックを崩しましたね。' },
+      { limit: 210, title: '修士', criterion: '2分30秒〜3分29秒', message: '見事な修了、おめでとうございます！' },
+      { limit: 270, title: '学部生', criterion: '3分30秒〜4分29秒', message: 'さらなる研究に期待しています！' },
+      { limit: Infinity, title: '高校生', criterion: '4分30秒以上', message: '未来の研究者候補ですね！' }
+    ];
+    function formatTime(seconds) {
+      const total = Math.floor(seconds);
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+    }
+    function currentRank(seconds) { return ranks.find(rank => seconds < rank.limit); }
+    let elapsedSeconds = 0;
+    let finalSeconds = 0;
+
+    const W = canvas.width, H = canvas.height;
+    const ballRadius = 8, paddleWidth = 100, paddleHeight = 12;
+    const paddleY = H - 22;
+    const rows = 7, cols = 17, brickWidth = 38, brickHeight = 18;
+    const brickPadding = 5, brickTop = 60, brickLeft = 35;
+    const layout = [
+      [1,0,1, 0,1,0,1, 0,1,0,1, 0,0,1,1,0,0],
+      [1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,0,1,0],
+      [0,1,0, 0,1,0,1, 0,0,1,0, 0,1,1,1,1,0],
+      [0,1,0, 0,1,0,1, 0,0,1,0, 0,1,0,0,1,0],
+      [0,1,0, 0,0,1,1, 0,0,1,0, 0,1,0,0,1,0],
+      [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+      [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]
+    ];
+    let bricks, remaining, x, y, dx, dy, paddleX, score, lives, state;
+    let leftPressed = false, rightPressed = false;
+    let lastTime = 0;
+
+    function newBall() {
+      x = W / 2; y = H - 52;
+      dx = 3; dy = -3;
+      paddleX = (W - paddleWidth) / 2;
+    }
+    function updateHud() {
+      scoreLabel.textContent = `SCORE: ${score}`;
+      livesLabel.textContent = `LIVES: ${'♥'.repeat(lives)}${'♡'.repeat(1 - lives)}`;
+    }
+    function resetGame() {
+      bricks = [];
+      remaining = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const type = layout[r][c];
+          if (type) {
+            bricks.push({
+              x: brickLeft + c * (brickWidth + brickPadding),
+              y: brickTop + r * (brickHeight + brickPadding),
+              type, active: true
+            });
+            remaining++;
+          }
+        }
+      }
+      score = 0; lives = 1; state = 'playing';
+      runId++; savedRunId = null; rankingConsent.checked = false; rankingStatus.textContent = '';
+      elapsedSeconds = 0; finalSeconds = 0;
+      timeLabel.textContent = 'TIME: 0:00';
+      certificate.classList.remove('show');
+      certificateForm.reset();
+      leftPressed = rightPressed = false;
+      newBall(); updateHud();
+      overlay.classList.remove('show');
+      pauseButton.textContent = '一時停止';
+    }
+    function endGame(won) {
+      state = won ? 'won' : 'lost';
+      finalSeconds = Math.floor(elapsedSeconds);
+      overlayTitle.textContent = won ? '🎉 全ブロック撃破！' : '💥 GAME OVER';
+      overlayText.textContent = won
+        ? `クリアおめでとう！あなたは立派な暇人ですね！\nスコア：${score}点。研究もこの集中力でお願いします。`
+        : `残念！スコアは ${score} 点。\nあなたが暇人ならば、もう1度挑戦しよう！\nでも次で最後にしようね！`;
+      overlayText.style.whiteSpace = 'pre-line';
+      certificate.classList.toggle('show', won);
+      if (won) {
+        const rank = currentRank(finalSeconds);
+        achievedRank.textContent = `🎓 あなたの称号：${rank.title}`;
+        clearTime.textContent = `クリアタイム：${formatTime(finalSeconds)}　｜　${rank.message}`;
+        rankRows.replaceChildren();
+        for (const item of ranks) {
+          const row = document.createElement('tr');
+          if (item === rank) row.classList.add('selected');
+          const name = document.createElement('td');
+          name.textContent = item.title + (item === rank ? ' ★' : '');
+          const time = document.createElement('td');
+          time.textContent = item.criterion;
+          row.append(name, time);
+          rankRows.append(row);
+        }
+      }
+      overlay.classList.add('show');
+      pauseButton.textContent = '一時停止';
+    }
+    function togglePause() {
+      if (state === 'playing') {
+        state = 'paused';
+        pauseButton.textContent = '再開';
+      } else if (state === 'paused') {
+        state = 'playing';
+        pauseButton.textContent = '一時停止';
+      }
+    }
+    function movePaddleTo(clientX) {
+      const rect = canvas.getBoundingClientRect();
+      const mappedX = (clientX - rect.left) * W / rect.width;
+      paddleX = Math.max(0, Math.min(W - paddleWidth, mappedX - paddleWidth / 2));
+    }
+    canvas.addEventListener('pointerdown', e => {
+      if (state !== 'playing') return;
+      canvas.setPointerCapture(e.pointerId);
+      movePaddleTo(e.clientX);
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (state === 'playing' && (e.pointerType === 'mouse' || e.buttons > 0)) movePaddleTo(e.clientX);
+    });
+    document.addEventListener('keydown', e => {
+      if (['ArrowRight', 'ArrowLeft', 'Space'].includes(e.code)) e.preventDefault();
+      if (e.code === 'ArrowRight') rightPressed = true;
+      if (e.code === 'ArrowLeft') leftPressed = true;
+      if (e.code === 'Space' && !e.repeat) togglePause();
+    });
+    document.addEventListener('keyup', e => {
+      if (e.code === 'ArrowRight') rightPressed = false;
+      if (e.code === 'ArrowLeft') leftPressed = false;
+    });
+    window.addEventListener('blur', () => {
+      if (state === 'playing') togglePause();
+      leftPressed = rightPressed = false;
+    });
+    restartButton.addEventListener('click', resetGame);
+    pauseButton.addEventListener('click', togglePause);
+
+    function update(step) {
+      if (rightPressed) paddleX += 7 * step;
+      if (leftPressed) paddleX -= 7 * step;
+      paddleX = Math.max(0, Math.min(W - paddleWidth, paddleX));
+
+      let nextX = x + dx * step;
+      let nextY = y + dy * step;
+      if (nextX >= W - ballRadius || nextX <= ballRadius) {
+        dx = -dx; nextX = x + dx * step;
+      }
+      if (nextY <= ballRadius) {
+        dy = Math.abs(dy); nextY = y + dy * step;
+      }
+
+      // 円と長方形の最近接点でブロック衝突を判定
+      for (const b of bricks) {
+        if (!b.active) continue;
+        const nearestX = Math.max(b.x, Math.min(nextX, b.x + brickWidth));
+        const nearestY = Math.max(b.y, Math.min(nextY, b.y + brickHeight));
+        const deltaX = nextX - nearestX, deltaY = nextY - nearestY;
+        if (deltaX * deltaX + deltaY * deltaY <= ballRadius * ballRadius) {
+          b.active = false;
+          remaining--;
+          score += b.type === 1 ? 20 : 10;
+          updateHud();
+          // 前フレームの位置を使い、横・縦どちらの面で反射するか決める
+          const fromLeft = x + ballRadius <= b.x;
+          const fromRight = x - ballRadius >= b.x + brickWidth;
+          if (fromLeft || fromRight) dx = -dx;
+          else dy = -dy;
+          nextX = x + dx * step;
+          nextY = y + dy * step;
+          if (remaining === 0) { endGame(true); return; }
+          break;
+        }
+      }
+
+      // パドルで跳ね返す。打点が左右にずれると反射角も変わる
+      if (dy > 0 && y + ballRadius <= paddleY && nextY + ballRadius >= paddleY &&
+          nextX + ballRadius >= paddleX && nextX - ballRadius <= paddleX + paddleWidth) {
+        const hit = Math.max(-1, Math.min(1, (nextX - (paddleX + paddleWidth / 2)) / (paddleWidth / 2)));
+        const speed = Math.hypot(dx, dy);
+        dx = speed * Math.sin(hit * 1.1);
+        dy = -speed * Math.cos(hit * 1.1);
+        nextY = paddleY - ballRadius;
+      }
+      x = nextX; y = nextY;
+      if (y - ballRadius > H) {
+        lives--;
+        updateHud();
+        if (lives <= 0) endGame(false);
+        else newBall();
+      }
+    }
+    function render() {
+      ctx.clearRect(0, 0, W, H);
+      for (const b of bricks) {
+        if (!b.active) continue;
+        ctx.fillStyle = b.type === 1 ? '#00e5ff' : '#444';
+        ctx.fillRect(b.x, b.y, brickWidth, brickHeight);
+      }
+      ctx.fillStyle = '#0095dd';
+      ctx.fillRect(paddleX, paddleY, paddleWidth, paddleHeight);
+      ctx.beginPath();
+      ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd700';
+      ctx.fill();
+      if (state === 'paused') {
+        ctx.fillStyle = 'rgba(0, 0, 0, .65)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 34px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('PAUSED', W / 2, H / 2);
+      }
+    }
+    function frame(timestamp) {
+      // 背景タブ復帰などで突然大きく進まないよう、移動量に上限を設定
+      const step = lastTime ? Math.min((timestamp - lastTime) / (1000 / 60), 2) : 1;
+      lastTime = timestamp;
+      if (state === 'playing') {
+        // 背景タブなどから復帰したときの異常な加算を防ぐ
+        elapsedSeconds += lastTime ? Math.max(0, Math.min(step * (1000 / 60) / 1000, 0.05)) : 0;
+        timeLabel.textContent = `TIME: ${formatTime(elapsedSeconds)}`;
+        update(step);
+      }
+      render();
+      requestAnimationFrame(frame);
+    }
+    // PDFに日本語を確実に表示するため、賞状をCanvasへ描き、画像としてPDFへ埋め込む。
+    // 外部ライブラリ/CDN不要。GitHub Pages上でもブラウザだけで作成できる。
+    function makeCertificateCanvas(name) {
+      const paper = document.createElement('canvas');
+      paper.width = 1754; paper.height = 1240; // A4横相当
+      const g = paper.getContext('2d');
+      g.fillStyle = '#fffdf6'; g.fillRect(0, 0, paper.width, paper.height);
+      g.strokeStyle = '#bc9248'; g.lineWidth = 16; g.strokeRect(50, 50, 1654, 1140);
+      g.strokeStyle = '#d7ba7e'; g.lineWidth = 3; g.strokeRect(72, 72, 1610, 1096);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      const centerX = paper.width / 2;
+      function write(str, y, size, color = '#15283e', weight = 'normal') {
+        g.fillStyle = color;
+        let fontSize = size;
+        do {
+          g.font = `${weight} ${fontSize}px \"Hiragino Kaku Gothic ProN\", \"Yu Gothic\", \"Noto Sans CJK JP\", sans-serif`;
+          if (g.measureText(str).width <= 1470) break;
+          fontSize -= 2;
+        } while (fontSize > 26);
+        g.fillText(str, centerX, y);
+      }
+      write('YUYA BLOCK BREAKER', 160, 39, '#8b6938', 'bold');
+      write('認 定 賞 状', 265, 85, '#192e49', 'bold');
+      write(`${name} 殿`, 390, 78, '#172c43', 'bold');
+      g.strokeStyle = '#bca16f'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(360, 458); g.lineTo(1394, 458); g.stroke();
+      write('あなたはすべてのブロックを見事に破壊し、', 522, 37);
+      write('貴重な時間と並外れた集中力を注がれました。', 582, 37);
+      write('よって、ここにその功績を称え、認定いたします。', 642, 37);
+      write('その集中力が、今後もっともっと有意義なことに向けられることを', 702, 32);
+      write('心よりお祈り申し上げます。', 753, 32);
+      write(`認定称号：${currentRank(finalSeconds).title}`, 849, 62, '#9c6420', 'bold');
+      write(`クリアタイム ${formatTime(finalSeconds)}   ／   SCORE ${score}`, 919, 34);
+      write(new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }), 1020, 30, '#4d6070');
+      write('YUYA BLOCK BREAKER 認定委員会　委員長 松田裕弥', 1091, 31, '#4d6070', 'bold');
+      return paper;
+    }
+    function pdfFromJpeg(dataUrl, width, height) {
+      // PDF 1.4: 1ページにJPEG画像を配置。日本語文字は画像内に保持。
+      const raw = atob(dataUrl.split(',')[1]);
+      const jpeg = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) jpeg[i] = raw.charCodeAt(i);
+      const encoder = new TextEncoder();
+      const parts = []; const offsets = [0]; let length = 0;
+      function append(bytes) { parts.push(bytes); length += bytes.length; }
+      function txt(str) { append(encoder.encode(str)); }
+      function object(id, contents) {
+        offsets[id] = length;
+        txt(`${id} 0 obj\n${contents}\nendobj\n`);
+      }
+      txt('%PDF-1.4\n%\xC2\xB5\xC2\xB6\n');
+      object(1, '<< /Type /Catalog /Pages 2 0 R >>');
+      object(2, '<< /Type /Pages /Count 1 /Kids [3 0 R] >>');
+      object(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`);
+      offsets[4] = length;
+      txt(`4 0 obj\n<< /Type /XObject /Subtype /Image /Width 1754 /Height 1240 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
+      append(jpeg);
+      txt('\nendstream\nendobj\n');
+      const stream = `q\n${width} 0 0 ${height} 0 0 cm\n/Im0 Do\nQ\n`;
+      object(5, `<< /Length ${encoder.encode(stream).length} >>\nstream\n${stream}endstream`);
+      const xrefOffset = length;
+      txt('xref\n0 6\n0000000000 65535 f \n');
+      for (let i = 1; i <= 5; i++) txt(`${String(offsets[i]).padStart(10, '0')} 00000 n \n`);
+      txt(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+      return new Blob(parts, { type: 'application/pdf' });
+    }
+    certificateForm.addEventListener('submit', e => {
+      e.preventDefault();
+      if (state !== 'won') return;
+      const name = playerName.value.trim().replace(/[\r\n\t]/g, ' ').slice(0, 20);
+      if (!name) { playerName.focus(); return; }
+      try {
+        const paper = makeCertificateCanvas(name);
+        const blob = pdfFromJpeg(paper.toDataURL('image/jpeg', 0.94), 842, 595);
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `YUYA_賞状_${currentRank(finalSeconds).title}.pdf`;
+        document.body.append(anchor);
+        anchor.click(); anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (error) {
+        console.error(error);
+        alert('PDFの作成に失敗しました。別のブラウザでお試しください。');
+      }
+    });
+    resetGame();
+    renderBoard();
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
