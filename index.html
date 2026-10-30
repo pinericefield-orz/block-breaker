@@ -27,6 +27,16 @@
     .cert-form label { font-size: 14px; }
     .cert-form input { width: min(100%, 290px); padding: 10px 12px; font-size: 16px; color: #fff; background: #16263b; border: 1px solid #6f89a5; border-radius: 8px; }
     .cert-form button { background: #ffdc75; }
+    .rank-actions { display: grid; gap: 8px; justify-items: center; margin: 10px auto; }
+    .rank-actions label { font-size: 13px; color: #d4dfed; display: flex; align-items: center; gap: 6px; }
+    .rank-actions input { width: 18px; height: 18px; }
+    .rank-actions button { background: #a8e8ff; }
+    .leaderboard { margin: 18px auto; max-width: 800px; border: 1px solid #304358; border-radius: 12px; padding: 12px; background: #151e2c; }
+    .leaderboard h2 { font-size: 18px; margin: 0 0 8px; }
+    .leaderboard table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .leaderboard th, .leaderboard td { padding: 8px 5px; border-bottom: 1px solid #334053; }
+    .leaderboard .hint { font-size: 12px; color: #b3bfd0; line-height: 1.5; }
+    .ranking-status { font-size: 12px; color: #ffdc75; }
     .cert-note { font-size: 12px !important; color: #b6c9d9 !important; }
     .time-label { color: #c1d6e5; }
     .panel h2 { font-size: clamp(23px, 5vw, 38px); line-height: 1.3; margin: 0 0 8px; color: #00e5ff; }
@@ -52,7 +62,7 @@
   <main class="game">
     <div class="hud" aria-live="polite">
       <span id="scoreLabel">SCORE: 0</span>
-      <span id="livesLabel">LIVES: ♥♥♥</span>
+      <span id="livesLabel">LIVES: ♥</span>
       <span id="timeLabel">TIME: 0:00</span>
     </div>
     <div class="stage">
@@ -70,13 +80,23 @@
               <input id="playerName" name="playerName" maxlength="20" required autocomplete="nickname" placeholder="例：松田 悠也">
               <button type="submit">🏆 賞状PDFをダウンロード</button>
             </form>
-            <p class="cert-note">賞状はこの端末内で作成します。お名前はサーバーに送信されません。</p>
+            <div class="rank-actions">
+              <label><input id="rankingConsent" type="checkbox"> 自分の名前・記録をランキングに掲載する（任意）</label>
+              <button id="rankingSubmit" type="button">ランキングに登録</button>
+              <span id="rankingStatus" class="ranking-status" aria-live="polite"></span>
+            </div>
+            <p class="cert-note">賞状の発行とランキング登録は別々です。未チェックなら掲載されません。登録するとお名前・タイム・得点がインターネット上で公開されます。賞状用のお名前は登録しない限り送信されません。</p>
           </section>
           <button id="restartButton" type="button">もう一度遊ぶ</button>
         </div>
       </div>
     </div>
     <div class="controls"><button id="pauseButton" type="button">一時停止</button></div>
+    <section class="leaderboard" aria-label="ランキング">
+      <h2>🏅 全プレイヤー共通ランキング TOP 10</h2>
+      <table><thead><tr><th>順位</th><th>名前</th><th>称号</th><th>タイム</th><th>得点</th></tr></thead><tbody id="leaderboardRows"></tbody></table>
+      <p class="hint">掲載はクリア後に希望した方のみ。ランキング表示にはネット接続が必要です。</p>
+    </section>
     <p class="help">PC：← → キー／マウス　｜　スマホ：ゲーム画面を指で左右になぞる<br>スペースキーで一時停止・再開</p>
   </main>
   <script>
@@ -97,15 +117,88 @@
     const achievedRank = document.getElementById('achievedRank');
     const clearTime = document.getElementById('clearTime');
     const rankRows = document.getElementById('rankRows');
+    const rankingConsent = document.getElementById('rankingConsent');
+    const rankingSubmit = document.getElementById('rankingSubmit');
+    const rankingStatus = document.getElementById('rankingStatus');
+    const leaderboardRows = document.getElementById('leaderboardRows');
+    // Supabase の Project URL と公開可能な anon/publishable key を入力してください。
+    // service_role / secret key は絶対にHTMLへ記載しないでください。
+    const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
+    const SUPABASE_KEY = 'YOUR_SUPABASE_PUBLISHABLE_KEY';
+    const backendReady = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL)
+      && !SUPABASE_KEY.startsWith('YOUR_');
+    let runId = 0;
+    let savedRunId = null;
+    const leaderboardHint = document.querySelector('.leaderboard .hint');
+    if (!backendReady) {
+      leaderboardHint.textContent = 'オンラインランキングは準備中です。管理者がSupabaseの接続設定を完了すると公開されます。';
+      rankingSubmit.disabled = true;
+      rankingSubmit.textContent = 'ランキング準備中';
+    }
+    async function api(path, options = {}) {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        ...options,
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.status === 204 ? null : response.json();
+    }
+    async function renderBoard() {
+      leaderboardRows.replaceChildren();
+      const message = text => {
+        const tr = document.createElement('tr'), td = document.createElement('td');
+        td.colSpan = 5; td.textContent = text;
+        tr.append(td); leaderboardRows.append(tr);
+      };
+      if (!backendReady) { message('オンラインランキング準備中'); return; }
+      message('ランキングを読み込んでいます…');
+      try {
+        const board = await api('yuya_scores?select=name,seconds,score&order=seconds.asc,score.desc&limit=10');
+        leaderboardRows.replaceChildren();
+        if (!board.length) { message('まだ記録がありません。最初のランカーになりましょう！'); return; }
+        board.forEach((entry, i) => {
+          const tr = document.createElement('tr');
+          [i + 1, entry.name, currentRank(entry.seconds).title, formatTime(entry.seconds), entry.score].forEach(value => {
+            const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
+          });
+          leaderboardRows.append(tr);
+        });
+      } catch (error) { leaderboardRows.replaceChildren(); message('ランキングを取得できませんでした。通信状態をご確認ください。'); }
+    }
+    rankingSubmit.addEventListener('click', async () => {
+      if (state !== 'won' || !backendReady) return;
+      if (!rankingConsent.checked) { rankingStatus.textContent = '掲載する場合はチェックを入れてください。'; return; }
+      const name = playerName.value.trim().replace(/[\r\n\t]/g, ' ').slice(0, 20);
+      if (!name) { rankingStatus.textContent = 'お名前を入力してください。'; playerName.focus(); return; }
+      if (savedRunId === runId) { rankingStatus.textContent = 'このプレイは登録済みです。'; return; }
+      const pendingRun = runId;
+      rankingSubmit.disabled = true;
+      rankingStatus.textContent = '登録中…';
+      try {
+        await api('yuya_scores', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ name, seconds: finalSeconds, score })
+        });
+        savedRunId = pendingRun;
+        rankingStatus.textContent = '全プレイヤー共通ランキングに登録しました！';
+        await renderBoard();
+      } catch (error) {
+        rankingStatus.textContent = '登録できませんでした。通信や設定をご確認ください。';
+      } finally { rankingSubmit.disabled = false; }
+    });
 
     // タイムは「プレイ中」のみ進む。一時停止や離席時間は加算しない。
     const ranks = [
-      { limit: 90, title: '暇人名誉教授', criterion: '1分30秒未満', message: 'ここまで極めるとは……研究よりブロックが専門ですか？' },
-      { limit: 150, title: '教授', criterion: '1分30秒〜2分29秒', message: 'ブロック崩し界の重鎮です。' },
-      { limit: 240, title: '博士', criterion: '2分30秒〜3分59秒', message: '学位論文より先にブロックを崩しましたね。' },
-      { limit: 360, title: '修士', criterion: '4分00秒〜5分59秒', message: '見事な修了、おめでとうございます！' },
-      { limit: 480, title: '学部卒', criterion: '6分00秒〜7分59秒', message: '卒業認定！ 次のステップへ。' },
-      { limit: Infinity, title: '高卒', criterion: '8分00秒以上', message: 'ここからが学びのスタートです！' }
+      { limit: 90, title: '教授', criterion: '1分30秒未満', message: 'ブロック崩し界の重鎮です。' },
+      { limit: 150, title: '博士', criterion: '1分30秒〜2分29秒', message: '学位論文より先にブロックを崩しましたね。' },
+      { limit: 210, title: '修士', criterion: '2分30秒〜3分29秒', message: '見事な修了、おめでとうございます！' },
+      { limit: 270, title: '学部生', criterion: '3分30秒〜4分29秒', message: 'さらなる研究に期待しています！' },
+      { limit: Infinity, title: '高校生', criterion: '4分30秒以上', message: '未来の研究者候補ですね！' }
     ];
     function formatTime(seconds) {
       const total = Math.floor(seconds);
@@ -140,7 +233,7 @@
     }
     function updateHud() {
       scoreLabel.textContent = `SCORE: ${score}`;
-      livesLabel.textContent = `LIVES: ${'♥'.repeat(lives)}${'♡'.repeat(3 - lives)}`;
+      livesLabel.textContent = `LIVES: ${'♥'.repeat(lives)}${'♡'.repeat(1 - lives)}`;
     }
     function resetGame() {
       bricks = [];
@@ -158,7 +251,8 @@
           }
         }
       }
-      score = 0; lives = 3; state = 'playing';
+      score = 0; lives = 1; state = 'playing';
+      runId++; savedRunId = null; rankingConsent.checked = false; rankingStatus.textContent = '';
       elapsedSeconds = 0; finalSeconds = 0;
       timeLabel.textContent = 'TIME: 0:00';
       certificate.classList.remove('show');
@@ -174,7 +268,7 @@
       overlayTitle.textContent = won ? '🎉 全ブロック撃破！' : '💥 GAME OVER';
       overlayText.textContent = won
         ? `クリアおめでとう！あなたは立派な暇人ですね！\nスコア：${score}点。研究もこの集中力でお願いします。`
-        : `惜しい！スコアは ${score} 点。もう一度、YUYAに挑戦！`;
+        : `残念！スコアは ${score} 点。\nあなたが暇人ならば、もう1度挑戦しよう！\nでも次で最後にしようね！`;
       overlayText.style.whiteSpace = 'pre-line';
       certificate.classList.toggle('show', won);
       if (won) {
@@ -343,17 +437,19 @@
         g.fillText(str, centerX, y);
       }
       write('YUYA BLOCK BREAKER', 160, 39, '#8b6938', 'bold');
-      write('🏆  暇人認定賞状  🏆', 285, 86, '#192e49', 'bold');
-      write(`${name} 殿`, 440, 81, '#172c43', 'bold');
+      write('認 定 賞 状', 265, 85, '#192e49', 'bold');
+      write(`${name} 殿`, 390, 78, '#172c43', 'bold');
       g.strokeStyle = '#bca16f'; g.lineWidth = 2;
-      g.beginPath(); g.moveTo(360, 505); g.lineTo(1394, 505); g.stroke();
-      write('あなたは YUYA の全ブロックを見事に破壊し、', 575, 38);
-      write('貴重な時間と並外れた集中力を注ぎ込まれました。', 638, 38);
-      write('よって、その功績を称え、ここに認定します。', 701, 38);
-      write(`認定称号：${currentRank(finalSeconds).title}`, 812, 67, '#9c6420', 'bold');
-      write(`クリアタイム ${formatTime(finalSeconds)}   ／   SCORE ${score}`, 898, 37);
-      write(new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }), 1009, 34, '#4d6070');
-      write('YUYA BLOCK BREAKER  認定委員会', 1090, 34, '#4d6070', 'bold');
+      g.beginPath(); g.moveTo(360, 458); g.lineTo(1394, 458); g.stroke();
+      write('あなたはすべてのブロックを見事に破壊し、', 522, 37);
+      write('貴重な時間と並外れた集中力を注がれました。', 582, 37);
+      write('よって、ここにその功績を称え、認定いたします。', 642, 37);
+      write('その集中力が、今後もっともっと有意義なことに向けられることを', 702, 32);
+      write('心よりお祈り申し上げます。', 753, 32);
+      write(`認定称号：${currentRank(finalSeconds).title}`, 849, 62, '#9c6420', 'bold');
+      write(`クリアタイム ${formatTime(finalSeconds)}   ／   SCORE ${score}`, 919, 34);
+      write(new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }), 1020, 30, '#4d6070');
+      write('YUYA BLOCK BREAKER 認定委員会　委員長 松田裕弥', 1091, 31, '#4d6070', 'bold');
       return paper;
     }
     function pdfFromJpeg(dataUrl, width, height) {
@@ -406,6 +502,7 @@
       }
     });
     resetGame();
+    renderBoard();
     requestAnimationFrame(frame);
   </script>
 </body>
